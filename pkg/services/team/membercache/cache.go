@@ -50,7 +50,7 @@ type cacheImpl struct {
 func NewCache(maxSize int, ttl time.Duration, tracer tracing.Tracer) Cache {
 	logger.Info("Initializing team member cache", "maxSize", maxSize, "ttl", ttl)
 
-	cache := expirable.NewLRU[string, team.PermissionType](
+	cache := expirable.NewLRU(
 		maxSize,
 		func(key string, value team.PermissionType) {
 			// Eviction callback - log when entries are evicted
