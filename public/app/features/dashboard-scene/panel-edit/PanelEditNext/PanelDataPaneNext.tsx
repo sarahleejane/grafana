@@ -123,7 +123,7 @@ export class PanelDataPaneNext extends SceneObjectBase<PanelDataPaneNextState> {
   public addQuery = (query?: Partial<DataQuery>, afterRefId?: string): string | undefined => {
     const queryRunner = getQueryRunnerFor(this.state.panelRef.resolve());
     if (!queryRunner) {
-      return undefined;
+      return;
     }
 
     const { datasource, dsSettings } = this.state;
