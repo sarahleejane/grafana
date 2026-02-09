@@ -11,7 +11,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/localcache"
 	"github.com/grafana/grafana/pkg/infra/tracing"
-	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/team"
 	"github.com/grafana/grafana/pkg/services/team/membercache"
 	"github.com/grafana/grafana/pkg/setting"
@@ -29,28 +28,19 @@ type Service struct {
 	memberCache membercache.Cache
 	store       store
 	tracer      tracing.Tracer
-	features    featuremgmt.FeatureToggles
 }
 
-func ProvideService(db db.DB, cfg *setting.Cfg, tracer tracing.Tracer, features ...featuremgmt.FeatureToggles) (team.Service, error) {
+func ProvideService(db db.DB, cfg *setting.Cfg, tracer tracing.Tracer) (team.Service, error) {
 	// Default to disabled cache
 	var memberCache membercache.Cache = &membercache.NoOpCache{}
 
-	// Override with real cache only if feature flag is enabled
-	var featureFlags featuremgmt.FeatureToggles
-	if len(features) > 0 {
-		featureFlags = features[0]
-	}
-
-	if featureFlags != nil {
-		//nolint:staticcheck // not yet migrated to OpenFeature
-		if featureFlags.IsEnabled(context.Background(), featuremgmt.FlagTeamMembershipQueryCache) {
-			memberCache = membercache.NewCache(
-				cfg.TeamMemberCache.MaxSize,
-				cfg.TeamMemberCache.TTL,
-				tracer,
-			)
-		}
+	// Override with real cache only if enabled in config
+	if cfg.TeamMemberCache.Enabled {
+		memberCache = membercache.NewCache(
+			cfg.TeamMemberCache.MaxSize,
+			cfg.TeamMemberCache.TTL,
+			tracer,
+		)
 	}
 
 	store := &xormStore{
@@ -59,7 +49,6 @@ func ProvideService(db db.DB, cfg *setting.Cfg, tracer tracing.Tracer, features 
 		deletes:     []string{},
 		memberCache: memberCache,
 		tracer:      tracer,
-		features:    featureFlags,
 	}
 
 	if err := store.teamMemberUidMigration(); err != nil {
@@ -71,7 +60,6 @@ func ProvideService(db db.DB, cfg *setting.Cfg, tracer tracing.Tracer, features 
 		memberCache: memberCache,
 		store:       store,
 		tracer:      tracer,
-		features:    featureFlags,
 	}, nil
 }
 

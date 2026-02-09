@@ -8,6 +8,8 @@ import (
 
 // TeamMemberCacheSettings contains settings for the team member permission cache
 type TeamMemberCacheSettings struct {
+	// Enable the team member permission cache
+	Enabled bool
 	// Maximum number of cached team member permission entries
 	MaxSize int
 	// Time-to-live for cached entries
@@ -18,6 +20,7 @@ func readTeamMemberCacheSettings(iniFile *ini.File) TeamMemberCacheSettings {
 	section := iniFile.Section("team.member_cache")
 
 	return TeamMemberCacheSettings{
+		Enabled: section.Key("enabled").MustBool(false),
 		MaxSize: section.Key("max_size").MustInt(1000),
 		TTL:     section.Key("ttl").MustDuration(5 * time.Minute),
 	}

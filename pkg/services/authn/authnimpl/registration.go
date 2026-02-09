@@ -161,8 +161,7 @@ func ProvideRegistration(
 	authnSvc.RegisterPostLoginHook(rbacSync.ClearUserPermissionCacheHook, 170)
 
 	// Clear team member cache on login to ensure fresh session data
-	//nolint:staticcheck // not yet migrated to OpenFeature
-	if features.IsEnabledGlobally(featuremgmt.FlagTeamMembershipQueryCache) {
+	if cfg.TeamMemberCache.Enabled {
 		clearCacheHook := func(ctx context.Context, identity *authn.Identity, r *authn.Request, err error) {
 			if err != nil || identity == nil {
 				return

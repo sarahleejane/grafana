@@ -44,7 +44,6 @@ type xormStore struct {
 	deletes     []string
 	memberCache membercache.Cache
 	tracer      tracing.Tracer
-	features    featuremgmt.FeatureToggles
 }
 
 func getFilteredUsers(signedInUser identity.Requester, hiddenUsers map[string]struct{}) []string {
@@ -418,10 +417,9 @@ func AddOrUpdateTeamMemberHook(sess *db.Session, userID, orgID, teamID int64, is
 
 // AddOrUpdateTeamMemberHookWithCache is the cacheable version of AddOrUpdateTeamMemberHook
 // It checks the cache before performing database operations and updates the cache on changes
-func AddOrUpdateTeamMemberHookWithCache(ctx context.Context, sess *db.Session, memberCache membercache.Cache, tracer tracing.Tracer, features featuremgmt.FeatureToggles, userID, orgID, teamID int64, isExternal bool, permission team.PermissionType) error {
+func AddOrUpdateTeamMemberHookWithCache(ctx context.Context, sess *db.Session, memberCache membercache.Cache, tracer tracing.Tracer, cfg *setting.Cfg, userID, orgID, teamID int64, isExternal bool, permission team.PermissionType) error {
 	// Check if caching is enabled
-	//nolint:staticcheck // not yet migrated to OpenFeature
-	cacheEnabled := features != nil && features.IsEnabled(ctx, featuremgmt.FlagTeamMembershipQueryCache) && memberCache != nil
+	cacheEnabled := cfg != nil && cfg.TeamMemberCache.Enabled && memberCache != nil
 
 	// Start tracing span
 	var span trace.Span

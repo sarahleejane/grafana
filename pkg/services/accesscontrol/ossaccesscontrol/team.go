@@ -94,9 +94,9 @@ func ProvideTeamPermissions(
 			}
 			switch permission {
 			case "Member":
-				return teamimpl.AddOrUpdateTeamMemberHookWithCache(context.Background(), session, memberCache, teamTracer, features, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeMember)
+				return teamimpl.AddOrUpdateTeamMemberHookWithCache(context.Background(), session, memberCache, teamTracer, cfg, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeMember)
 			case "Admin":
-				return teamimpl.AddOrUpdateTeamMemberHookWithCache(context.Background(), session, memberCache, teamTracer, features, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeAdmin)
+				return teamimpl.AddOrUpdateTeamMemberHookWithCache(context.Background(), session, memberCache, teamTracer, cfg, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeAdmin)
 			case "":
 				return teamimpl.RemoveTeamMemberHook(session, &team.RemoveTeamMemberCommand{
 					OrgID:  orgID,
