@@ -1,18 +1,29 @@
 import { css } from '@emotion/css';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { CoreApp, GrafanaTheme2 } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { config as grafanaConfig } from '@grafana/runtime';
-import { ExpressionDatasourceRef } from '@grafana/runtime/internal';
 import { DataQuery } from '@grafana/schema';
 import { Dropdown, Icon, Menu, Stack, Text, useStyles2, useTheme2 } from '@grafana/ui';
 import { contextSrv } from 'app/core/services/context_srv';
 import { useQueryLibraryContext } from 'app/features/explore/QueryLibrary/QueryLibraryContext';
+import { dataSource as expressionDatasource } from 'app/features/expressions/ExpressionDatasource';
+import { ExpressionQueryType, expressionTypes } from 'app/features/expressions/types';
+import { getDefaults } from 'app/features/expressions/utils/expressionTypes';
 import { AccessControlAction } from 'app/types/accessControl';
 
 import { QueryEditorTypeConfig } from '../../constants';
 import { useActionsContext, useQueryEditorUIContext } from '../QueryEditorContext';
+
+const EXPRESSION_ICON_MAP = {
+  [ExpressionQueryType.math]: 'calculator-alt',
+  [ExpressionQueryType.reduce]: 'compress-arrows',
+  [ExpressionQueryType.resample]: 'sync',
+  [ExpressionQueryType.classic]: 'cog',
+  [ExpressionQueryType.threshold]: 'sliders-v-alt',
+  [ExpressionQueryType.sql]: 'database',
+} as const satisfies Record<ExpressionQueryType, string>;
 
 interface SidebarCardProps {
   config: QueryEditorTypeConfig;
@@ -22,6 +33,11 @@ interface SidebarCardProps {
   onClick: () => void;
 }
 
+/**
+ * The various menu views for the sidebar card.
+ */
+type MenuView = 'main' | 'expressionTypes';
+
 export const SidebarCard = ({ config, isSelected, id, children, onClick }: SidebarCardProps) => {
   const styles = useStyles2(getStyles, { config, isSelected });
   const theme = useTheme2();
@@ -30,8 +46,12 @@ export const SidebarCard = ({ config, isSelected, id, children, onClick }: Sideb
   const { setSelectedQuery } = useQueryEditorUIContext();
   const { openDrawer, queryLibraryEnabled } = useQueryLibraryContext();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuView, setMenuView] = useState<MenuView>('main');
   const addButtonRef = useRef<HTMLButtonElement>(null);
 
+  // When the savedQueriesRBAC feature toggle is enabled, access to the query
+  // library is governed by fine-grained RBAC permissions. Otherwise, any
+  // signed-in user can read saved queries (the pre-RBAC default).
   const canReadQueries = grafanaConfig.featureToggles.savedQueriesRBAC
     ? contextSrv.hasPermission(AccessControlAction.QueriesRead)
     : contextSrv.isSignedIn;
@@ -40,39 +60,85 @@ export const SidebarCard = ({ config, isSelected, id, children, onClick }: Sideb
   const addAndSelect = (query?: Partial<DataQuery>) => {
     const newRefId = addQuery(query, id);
     if (newRefId) {
-      // setSelectedQuery only needs refId to identify the query;
-      // the full DataQuery will be resolved from the queries array.
+      // `setSelectedQuery` only needs a `refId` to identify the query;
+      // the full `DataQuery` will be resolved from the queries array.
       const selectTarget: DataQuery = { refId: newRefId, hide: false };
       setSelectedQuery(selectTarget);
     }
   };
 
-  const addMenu = (
-    <Menu>
-      <Menu.Item
-        label={t('query-editor-next.sidebar.add-query', 'Add query')}
-        icon="question-circle"
-        onClick={() => addAndSelect()}
-      />
-      {queryLibraryEnabled && canReadQueries && (
+  /** Create an expression of a certain type and add it. */
+  const addExpressionOfType = (type: ExpressionQueryType) => {
+    const baseQuery = expressionDatasource.newQuery();
+    const queryWithType = { ...baseQuery, type };
+    const queryWithDefaults = getDefaults(queryWithType);
+    addAndSelect(queryWithDefaults);
+  };
+
+  /** Reset the menu to the main view when it closes. */
+  const handleMenuVisibleChange = useCallback((visible: boolean) => {
+    setMenuOpen(visible);
+    if (!visible) {
+      setMenuView('main');
+    }
+  }, []);
+
+  const menus: Record<MenuView, React.ReactElement> = {
+    main: (
+      <Menu>
         <Menu.Item
-          label={t('query-editor-next.sidebar.add-saved-query', 'Add saved query')}
-          icon="book-open"
-          onClick={() =>
-            openDrawer({
-              onSelectQuery: (query) => addAndSelect(query),
-              options: { context: CoreApp.PanelEditor },
-            })
-          }
+          label={t('query-editor-next.sidebar.add-query', 'Add query')}
+          icon="question-circle"
+          onClick={() => addAndSelect()}
         />
-      )}
-      <Menu.Item
-        label={t('query-editor-next.sidebar.add-expression', 'Add expression')}
-        icon="calculator-alt"
-        onClick={() => addAndSelect({ datasource: ExpressionDatasourceRef })}
-      />
-    </Menu>
-  );
+        {queryLibraryEnabled && canReadQueries && (
+          <Menu.Item
+            label={t('query-editor-next.sidebar.add-saved-query', 'Add saved query')}
+            icon="book-open"
+            onClick={() =>
+              openDrawer({
+                onSelectQuery: (query) => addAndSelect(query),
+                options: { context: CoreApp.PanelEditor },
+              })
+            }
+          />
+        )}
+        <Menu.Item
+          label={t('query-editor-next.sidebar.add-expression', 'Add expression')}
+          icon="calculator-alt"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuView('expressionTypes');
+          }}
+        />
+      </Menu>
+    ),
+    expressionTypes: (
+      <Menu>
+        <Menu.Item
+          label={t('query-editor-next.sidebar.back', 'Back')}
+          icon="arrow-left"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuView('main');
+          }}
+        />
+        <Menu.Divider />
+        {expressionTypes.map((item) => (
+          <Menu.Item
+            key={item.value}
+            label={item.label ?? ''}
+            icon={EXPRESSION_ICON_MAP[item.value!]}
+            onClick={() => addExpressionOfType(item.value!)}
+          />
+        ))}
+      </Menu>
+    ),
+  };
+
+  const addMenu = menus[menuView];
 
   return (
     <div className={styles.wrapper}>
@@ -97,7 +163,7 @@ export const SidebarCard = ({ config, isSelected, id, children, onClick }: Sideb
         overlay={addMenu}
         placement="right-start"
         offset={[theme.spacing.gridSize, 0]} // nudge the menu to the right, for a little space between the "+" button and the menu
-        onVisibleChange={setMenuOpen}
+        onVisibleChange={handleMenuVisibleChange}
       >
         <button
           ref={addButtonRef}
