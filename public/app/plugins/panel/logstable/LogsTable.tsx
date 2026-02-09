@@ -10,7 +10,7 @@ import {
   PanelData,
   PanelProps,
 } from '@grafana/data';
-import type { Options as TableOptions } from '@grafana/schema/src/raw/composable/table/panelcfg/x/TablePanelCfg_types.gen';
+import type { Options as TableOptions } from '@grafana/schema/dist/esm/raw/composable/table/panelcfg/x/TablePanelCfg_types.gen';
 import { useStyles2 } from '@grafana/ui';
 import { FIELD_SELECTOR_DEFAULT_WIDTH } from 'app/features/logs/components/fieldSelector/FieldSelector';
 import {
