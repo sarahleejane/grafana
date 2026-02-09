@@ -12,47 +12,40 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/tracing"
-	"github.com/grafana/grafana/pkg/services/team"
 )
 
 var logger = log.New("team.membercache")
 
-// Cache provides an in-memory cache for team member permissions
-// to reduce database load when users belong to many teams/groups
+// Cache provides sync tracking to prevent redundant team synchronization operations
+// It tracks when users were last synced to reduce database load
 type Cache interface {
-	// Get retrieves a cached permission for a team member
-	Get(ctx context.Context, orgID, teamID, userID int64) (team.PermissionType, bool)
+	// ShouldSync returns true if the user should be synced (not recently synced)
+	ShouldSync(ctx context.Context, orgID, userID int64) bool
 
-	// Set stores a team member permission in the cache
-	Set(ctx context.Context, orgID, teamID, userID int64, permission team.PermissionType)
+	// MarkSynced marks a user as having been synced at the current time
+	MarkSynced(ctx context.Context, orgID, userID int64)
 
-	// ClearUser removes all cached entries for a specific user
+	// ClearUser removes sync tracking for a specific user (e.g., on login)
 	ClearUser(ctx context.Context, userID int64)
-
-	// ClearAll removes all entries from the cache
-	ClearAll(ctx context.Context)
-
-	// Len returns the current number of entries in the cache
-	Len() int
 }
 
 type cacheImpl struct {
-	cache  *expirable.LRU[string, team.PermissionType]
+	cache  *expirable.LRU[string, time.Time]
 	tracer tracing.Tracer
+	ttl    time.Duration
 
-	// userKeys maps userID to a list of cache keys for that user
-	// This enables efficient cache clearing on login
+	// userKeys maps userID to all their cache keys (across orgs) for efficient clearing
 	userKeys map[int64][]string
 	mu       sync.RWMutex
 }
 
-// NewCache creates a new team member cache with LRU+TTL eviction
+// NewCache creates a new user sync tracking cache with LRU+TTL eviction
 func NewCache(maxSize int, ttl time.Duration, tracer tracing.Tracer) Cache {
-	logger.Info("Initializing team member cache", "maxSize", maxSize, "ttl", ttl)
+	logger.Info("Initializing user sync tracking cache", "maxSize", maxSize, "ttl", ttl)
 
 	cache := expirable.NewLRU(
 		maxSize,
-		func(key string, value team.PermissionType) {
+		func(key string, value time.Time) {
 			// Eviction callback - log when entries are evicted
 			logger.Debug("Cache entry evicted", "key", key)
 		},
@@ -62,50 +55,73 @@ func NewCache(maxSize int, ttl time.Duration, tracer tracing.Tracer) Cache {
 	return &cacheImpl{
 		cache:    cache,
 		tracer:   tracer,
+		ttl:      ttl,
 		userKeys: make(map[int64][]string),
 	}
 }
 
-func (c *cacheImpl) Get(ctx context.Context, orgID, teamID, userID int64) (team.PermissionType, bool) {
-	_, span := c.tracer.Start(ctx, "team.membercache.Get", trace.WithAttributes(
+func (c *cacheImpl) ShouldSync(ctx context.Context, orgID, userID int64) bool {
+	_, span := c.tracer.Start(ctx, "team.membercache.ShouldSync", trace.WithAttributes(
 		attribute.Int64("org_id", orgID),
-		attribute.Int64("team_id", teamID),
 		attribute.Int64("user_id", userID),
 	))
 	defer span.End()
 
-	key := makeCacheKey(orgID, teamID, userID)
-	value, found := c.cache.Get(key)
-
-	span.SetAttributes(attribute.Bool("cache.hit", found))
+	key := makeCacheKey(orgID, userID)
+	lastSync, found := c.cache.Get(key)
 
 	if found {
-		logger.Debug("Cache hit", "key", key, "permission", value)
-	} else {
-		logger.Debug("Cache miss", "key", key)
+		timeSinceSync := time.Since(lastSync)
+		shouldSync := timeSinceSync >= c.ttl
+
+		span.SetAttributes(
+			attribute.Bool("cache.hit", true),
+			attribute.Int64("time_since_sync_ms", timeSinceSync.Milliseconds()),
+			attribute.Bool("should_sync", shouldSync),
+		)
+
+		if !shouldSync {
+			logger.Debug("User recently synced, skipping",
+				"key", key,
+				"lastSync", lastSync,
+				"timeSince", timeSinceSync)
+			return false
+		}
 	}
 
-	return value, found
+	span.SetAttributes(attribute.Bool("cache.hit", false))
+	logger.Debug("User should be synced", "key", key, "found", found)
+	return true
 }
 
-func (c *cacheImpl) Set(ctx context.Context, orgID, teamID, userID int64, permission team.PermissionType) {
-	_, span := c.tracer.Start(ctx, "team.membercache.Set", trace.WithAttributes(
+func (c *cacheImpl) MarkSynced(ctx context.Context, orgID, userID int64) {
+	_, span := c.tracer.Start(ctx, "team.membercache.MarkSynced", trace.WithAttributes(
 		attribute.Int64("org_id", orgID),
-		attribute.Int64("team_id", teamID),
 		attribute.Int64("user_id", userID),
-		attribute.Int64("permission", int64(permission)),
 	))
 	defer span.End()
 
-	key := makeCacheKey(orgID, teamID, userID)
-	c.cache.Add(key, permission)
+	key := makeCacheKey(orgID, userID)
+	now := time.Now()
+	c.cache.Add(key, now)
 
 	// Track this key for the user to enable efficient clearing
 	c.mu.Lock()
-	c.userKeys[userID] = append(c.userKeys[userID], key)
+	keys := c.userKeys[userID]
+	// Check if key already exists
+	found := false
+	for _, k := range keys {
+		if k == key {
+			found = true
+			break
+		}
+	}
+	if !found {
+		c.userKeys[userID] = append(keys, key)
+	}
 	c.mu.Unlock()
 
-	logger.Debug("Cache entry added", "key", key, "permission", permission)
+	logger.Debug("Marked user as synced", "key", key, "time", now)
 }
 
 func (c *cacheImpl) ClearUser(ctx context.Context, userID int64) {
@@ -117,64 +133,38 @@ func (c *cacheImpl) ClearUser(ctx context.Context, userID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	keys, exists := c.userKeys[userID]
-	if !exists {
+	keys, found := c.userKeys[userID]
+	if !found {
 		logger.Debug("No cache entries found for user", "userID", userID)
 		return
 	}
 
-	clearedCount := 0
+	// Remove all keys for this user (across all orgs)
 	for _, key := range keys {
-		if c.cache.Remove(key) {
-			clearedCount++
-		}
+		c.cache.Remove(key)
+		logger.Debug("Cleared cache entry", "userID", userID, "key", key)
 	}
-
-	// Remove the user's key list
 	delete(c.userKeys, userID)
 
-	span.SetAttributes(attribute.Int("cleared_entries", clearedCount))
-	logger.Info("Cleared user cache entries", "userID", userID, "count", clearedCount)
+	logger.Debug("Cleared all cache entries for user", "userID", userID, "count", len(keys))
 }
 
-func (c *cacheImpl) ClearAll(ctx context.Context) {
-	_, span := c.tracer.Start(ctx, "team.membercache.ClearAll")
-	defer span.End()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.cache.Purge()
-	c.userKeys = make(map[int64][]string)
-
-	logger.Info("Cleared all cache entries")
+// makeCacheKey creates a cache key for org-user sync tracking
+func makeCacheKey(orgID, userID int64) string {
+	return fmt.Sprintf("%d:%d", orgID, userID)
 }
 
-func (c *cacheImpl) Len() int {
-	return c.cache.Len()
-}
-
-// makeCacheKey creates a cache key from org, team, and user IDs
-func makeCacheKey(orgID, teamID, userID int64) string {
-	return fmt.Sprintf("%d:%d:%d", orgID, teamID, userID)
-}
-
-// NoOpCache is a cache implementation that does nothing (for when feature flag is disabled)
+// NoOpCache is a cache implementation that does nothing (used when caching is disabled)
 type NoOpCache struct{}
 
-func (n *NoOpCache) Get(ctx context.Context, orgID, teamID, userID int64) (team.PermissionType, bool) {
-	return 0, false
+func (n *NoOpCache) ShouldSync(ctx context.Context, orgID, userID int64) bool {
+	return true // Always sync when cache disabled
 }
 
-func (n *NoOpCache) Set(ctx context.Context, orgID, teamID, userID int64, permission team.PermissionType) {
+func (n *NoOpCache) MarkSynced(ctx context.Context, orgID, userID int64) {
+	// No-op
 }
 
 func (n *NoOpCache) ClearUser(ctx context.Context, userID int64) {
-}
-
-func (n *NoOpCache) ClearAll(ctx context.Context) {
-}
-
-func (n *NoOpCache) Len() int {
-	return 0
+	// No-op
 }

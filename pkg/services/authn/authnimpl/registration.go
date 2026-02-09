@@ -35,6 +35,7 @@ import (
 
 type Registration struct{}
 
+//nolint:gocyclo // Provider function that registers multiple clients based on configuration
 func ProvideRegistration(
 	cfg *setting.Cfg, authnSvc authn.Service,
 	orgService org.Service, sessionService auth.UserTokenService,
@@ -155,7 +156,53 @@ func ProvideRegistration(
 		authnSvc.RegisterPreLogoutHook(gcomsso.ProvideGComSSOService(cfg).LogoutHook, 50)
 	}
 
-	authnSvc.RegisterPostAuthHook(rbacSync.SyncPermissionsHook, 120)
+	// Wrap SyncPermissionsHook with cache check to skip redundant syncs
+	syncPermissionsWithCache := func(ctx context.Context, identity *authn.Identity, r *authn.Request) error {
+		// Get member cache if available and cache is enabled
+		if cfg.TeamMemberCache.Enabled {
+			if teamSvc, ok := teamService.(interface {
+				GetMemberCache() teamimpl.MemberCache
+			}); ok {
+				memberCache := teamSvc.GetMemberCache()
+				if memberCache != nil {
+					// Parse user ID and org ID
+					userID, parseErr := strconv.ParseInt(identity.GetID(), 10, 64)
+					if parseErr == nil && identity.GetOrgID() > 0 {
+						// Check if user was recently synced
+						if !memberCache.ShouldSync(ctx, identity.GetOrgID(), userID) {
+							logger.Debug("Skipping permission sync (user recently synced)",
+								"userID", userID, "orgID", identity.GetOrgID())
+							return nil
+						}
+					}
+				}
+			}
+		}
+
+		// Proceed with actual sync
+		err := rbacSync.SyncPermissionsHook(ctx, identity, r)
+
+		// Mark as synced if successful and cache enabled
+		if err == nil && cfg.TeamMemberCache.Enabled {
+			if teamSvc, ok := teamService.(interface {
+				GetMemberCache() teamimpl.MemberCache
+			}); ok {
+				memberCache := teamSvc.GetMemberCache()
+				if memberCache != nil {
+					userID, parseErr := strconv.ParseInt(identity.GetID(), 10, 64)
+					if parseErr == nil && identity.GetOrgID() > 0 {
+						memberCache.MarkSynced(ctx, identity.GetOrgID(), userID)
+						logger.Debug("Marked user as synced after permission sync",
+							"userID", userID, "orgID", identity.GetOrgID())
+					}
+				}
+			}
+		}
+
+		return err
+	}
+
+	authnSvc.RegisterPostAuthHook(syncPermissionsWithCache, 120)
 	authnSvc.RegisterPostLoginHook(orgSync.SetDefaultOrgHook, 140)
 	authnSvc.RegisterPostLoginHook(userSync.CatalogLoginHook, 145)
 	authnSvc.RegisterPostLoginHook(rbacSync.ClearUserPermissionCacheHook, 170)

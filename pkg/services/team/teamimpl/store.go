@@ -8,9 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-
 	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/tracing"
@@ -411,58 +408,15 @@ func isTeamMember(sess *db.Session, orgId int64, teamId int64, userId int64) (bo
 // AddOrUpdateTeamMemberHook is called from team resource permission service
 // it adds user to a team or updates user permissions in a team within the given transaction session
 func AddOrUpdateTeamMemberHook(sess *db.Session, userID, orgID, teamID int64, isExternal bool, permission team.PermissionType) error {
-	return AddOrUpdateTeamMemberHookWithCache(context.Background(), sess, nil, nil, nil, userID, orgID, teamID, isExternal, permission)
-}
-
-// AddOrUpdateTeamMemberHookWithCache is the cacheable version of AddOrUpdateTeamMemberHook
-// It checks the cache before performing database operations and updates the cache on changes
-func AddOrUpdateTeamMemberHookWithCache(ctx context.Context, sess *db.Session, memberCache membercache.Cache, tracer tracing.Tracer, cfg *setting.Cfg, userID, orgID, teamID int64, isExternal bool, permission team.PermissionType) error {
-	// Check if caching is enabled
-	cacheEnabled := cfg != nil && cfg.TeamMemberCache.Enabled && memberCache != nil
-
-	// Start tracing span
-	var span trace.Span
-	if tracer != nil {
-		ctx, span = tracer.Start(ctx, "team.AddOrUpdateTeamMemberHook", trace.WithAttributes(
-			attribute.Int64("org_id", orgID),
-			attribute.Int64("team_id", teamID),
-			attribute.Int64("user_id", userID),
-			attribute.Bool("cache_enabled", cacheEnabled),
-		))
-		defer span.End()
-	}
-
-	// Check cache if enabled
-	if cacheEnabled {
-		cachedPerm, found := memberCache.Get(ctx, orgID, teamID, userID)
-		if found {
-			if cachedPerm == permission {
-				// Permission hasn't changed, skip database operation
-				if span != nil {
-					span.SetAttributes(attribute.Bool("cache.skip_update", true))
-				}
-				return nil
-			}
-		}
-	}
-
 	isMember, err := isTeamMember(sess, orgID, teamID, userID)
 	if err != nil {
 		return err
 	}
 
 	if isMember {
-		err = updateTeamMember(sess, orgID, teamID, userID, permission)
-	} else {
-		err = addTeamMember(sess, orgID, teamID, userID, isExternal, permission)
+		return updateTeamMember(sess, orgID, teamID, userID, permission)
 	}
-
-	// Update cache if operation succeeded and caching is enabled
-	if err == nil && cacheEnabled {
-		memberCache.Set(ctx, orgID, teamID, userID, permission)
-	}
-
-	return err
+	return addTeamMember(sess, orgID, teamID, userID, isExternal, permission)
 }
 
 func addTeamMember(sess *db.Session, orgID, teamID, userID int64, isExternal bool, permission team.PermissionType) error {

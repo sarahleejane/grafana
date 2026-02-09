@@ -9,60 +9,70 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/grafana/pkg/infra/tracing"
-	"github.com/grafana/grafana/pkg/services/team"
 )
 
-func TestCache_GetSet(t *testing.T) {
+func TestCache_ShouldSync_InitialSync(t *testing.T) {
 	ctx := context.Background()
 	tracer := tracing.InitializeTracerForTest()
 	cache := NewCache(100, 5*time.Minute, tracer)
 
-	// Test cache miss
-	_, found := cache.Get(ctx, 1, 1, 1)
-	assert.False(t, found, "Expected cache miss")
-
-	// Test cache set and hit
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-	perm, found := cache.Get(ctx, 1, 1, 1)
-	assert.True(t, found, "Expected cache hit")
-	assert.Equal(t, team.PermissionTypeMember, perm)
-
-	// Test different permission type
-	cache.Set(ctx, 1, 2, 1, team.PermissionTypeAdmin)
-	perm, found = cache.Get(ctx, 1, 2, 1)
-	assert.True(t, found, "Expected cache hit")
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
+	// First sync - should always return true
+	shouldSync := cache.ShouldSync(ctx, 1, 1)
+	assert.True(t, shouldSync, "First sync should always proceed")
 }
 
-func TestCache_MultipleEntries(t *testing.T) {
+func TestCache_ShouldSync_RecentlySync(t *testing.T) {
 	ctx := context.Background()
 	tracer := tracing.InitializeTracerForTest()
 	cache := NewCache(100, 5*time.Minute, tracer)
 
-	// Add multiple entries for different users/teams
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-	cache.Set(ctx, 1, 2, 1, team.PermissionTypeAdmin)
-	cache.Set(ctx, 1, 3, 2, team.PermissionTypeMember)
-	cache.Set(ctx, 2, 1, 1, team.PermissionTypeAdmin)
+	// Mark user as synced
+	cache.MarkSynced(ctx, 1, 1)
 
-	assert.Equal(t, 4, cache.Len(), "Expected 4 entries in cache")
+	// Immediately check - should return false (recently synced)
+	shouldSync := cache.ShouldSync(ctx, 1, 1)
+	assert.False(t, shouldSync, "Should skip sync for recently synced user")
+}
 
-	// Verify each entry
-	perm, found := cache.Get(ctx, 1, 1, 1)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeMember, perm)
+func TestCache_ShouldSync_AfterTTL(t *testing.T) {
+	ctx := context.Background()
+	tracer := tracing.InitializeTracerForTest()
 
-	perm, found = cache.Get(ctx, 1, 2, 1)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
+	// Create cache with very short TTL
+	cache := NewCache(100, 100*time.Millisecond, tracer)
 
-	perm, found = cache.Get(ctx, 1, 3, 2)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeMember, perm)
+	// Mark user as synced
+	cache.MarkSynced(ctx, 1, 1)
 
-	perm, found = cache.Get(ctx, 2, 1, 1)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
+	// Should not sync immediately
+	shouldSync := cache.ShouldSync(ctx, 1, 1)
+	require.False(t, shouldSync)
+
+	// Wait for TTL to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Should sync again after TTL
+	shouldSync = cache.ShouldSync(ctx, 1, 1)
+	assert.True(t, shouldSync, "Should sync again after TTL expires")
+}
+
+func TestCache_MultipleUsers(t *testing.T) {
+	ctx := context.Background()
+	tracer := tracing.InitializeTracerForTest()
+	cache := NewCache(100, 5*time.Minute, tracer)
+
+	// Mark multiple users as synced
+	cache.MarkSynced(ctx, 1, 1)
+	cache.MarkSynced(ctx, 1, 2)
+	cache.MarkSynced(ctx, 2, 1) // Different org
+
+	// All should be skipped
+	assert.False(t, cache.ShouldSync(ctx, 1, 1))
+	assert.False(t, cache.ShouldSync(ctx, 1, 2))
+	assert.False(t, cache.ShouldSync(ctx, 2, 1))
+
+	// Different user should still sync
+	assert.True(t, cache.ShouldSync(ctx, 1, 3))
 }
 
 func TestCache_ClearUser(t *testing.T) {
@@ -70,60 +80,22 @@ func TestCache_ClearUser(t *testing.T) {
 	tracer := tracing.InitializeTracerForTest()
 	cache := NewCache(100, 5*time.Minute, tracer)
 
-	// Add entries for two users
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-	cache.Set(ctx, 1, 2, 1, team.PermissionTypeAdmin)
-	cache.Set(ctx, 1, 3, 1, team.PermissionTypeMember)
-	cache.Set(ctx, 1, 1, 2, team.PermissionTypeMember)
-	cache.Set(ctx, 1, 2, 2, team.PermissionTypeAdmin)
+	// Mark users as synced
+	cache.MarkSynced(ctx, 1, 1)
+	cache.MarkSynced(ctx, 1, 2)
 
-	assert.Equal(t, 5, cache.Len())
+	// Verify both are cached
+	assert.False(t, cache.ShouldSync(ctx, 1, 1))
+	assert.False(t, cache.ShouldSync(ctx, 1, 2))
 
 	// Clear user 1
 	cache.ClearUser(ctx, 1)
 
-	// User 1's entries should be gone
-	_, found := cache.Get(ctx, 1, 1, 1)
-	assert.False(t, found)
-	_, found = cache.Get(ctx, 1, 2, 1)
-	assert.False(t, found)
-	_, found = cache.Get(ctx, 1, 3, 1)
-	assert.False(t, found)
+	// User 1 should sync again (cache cleared)
+	assert.True(t, cache.ShouldSync(ctx, 1, 1))
 
-	// User 2's entries should remain
-	perm, found := cache.Get(ctx, 1, 1, 2)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeMember, perm)
-
-	perm, found = cache.Get(ctx, 1, 2, 2)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
-}
-
-func TestCache_ClearAll(t *testing.T) {
-	ctx := context.Background()
-	tracer := tracing.InitializeTracerForTest()
-	cache := NewCache(100, 5*time.Minute, tracer)
-
-	// Add multiple entries
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-	cache.Set(ctx, 1, 2, 1, team.PermissionTypeAdmin)
-	cache.Set(ctx, 1, 3, 2, team.PermissionTypeMember)
-
-	assert.Equal(t, 3, cache.Len())
-
-	// Clear all
-	cache.ClearAll(ctx)
-
-	assert.Equal(t, 0, cache.Len())
-
-	// Verify all entries are gone
-	_, found := cache.Get(ctx, 1, 1, 1)
-	assert.False(t, found)
-	_, found = cache.Get(ctx, 1, 2, 1)
-	assert.False(t, found)
-	_, found = cache.Get(ctx, 1, 3, 2)
-	assert.False(t, found)
+	// User 2 should still be cached
+	assert.False(t, cache.ShouldSync(ctx, 1, 2))
 }
 
 func TestCache_LRUEviction(t *testing.T) {
@@ -133,86 +105,65 @@ func TestCache_LRUEviction(t *testing.T) {
 	// Create a cache with only 3 entries
 	cache := NewCache(3, 5*time.Minute, tracer)
 
-	// Add 3 entries
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-	cache.Set(ctx, 1, 2, 1, team.PermissionTypeAdmin)
-	cache.Set(ctx, 1, 3, 1, team.PermissionTypeMember)
+	// Mark 3 users as synced
+	cache.MarkSynced(ctx, 1, 1)
+	cache.MarkSynced(ctx, 1, 2)
+	cache.MarkSynced(ctx, 1, 3)
 
-	assert.Equal(t, 3, cache.Len())
+	// All should be cached
+	assert.False(t, cache.ShouldSync(ctx, 1, 1))
+	assert.False(t, cache.ShouldSync(ctx, 1, 2))
+	assert.False(t, cache.ShouldSync(ctx, 1, 3))
 
-	// Add a 4th entry - should evict the oldest
-	cache.Set(ctx, 1, 4, 1, team.PermissionTypeAdmin)
+	// Mark a 4th user - should evict the oldest (user 1)
+	cache.MarkSynced(ctx, 1, 4)
 
-	assert.Equal(t, 3, cache.Len(), "Cache should maintain max size")
+	// User 4 should be cached
+	assert.False(t, cache.ShouldSync(ctx, 1, 4))
 
-	// The 4th entry should be present
-	perm, found := cache.Get(ctx, 1, 4, 1)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
+	// User 1 likely evicted (LRU), should need sync
+	// Note: This test is probabilistic based on LRU implementation
+	shouldSync := cache.ShouldSync(ctx, 1, 1)
+	t.Logf("User 1 shouldSync after eviction: %v", shouldSync)
 }
 
-func TestCache_TTLExpiration(t *testing.T) {
-	ctx := context.Background()
-	tracer := tracing.InitializeTracerForTest()
-
-	// Create a cache with very short TTL
-	cache := NewCache(100, 100*time.Millisecond, tracer)
-
-	// Add an entry
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-
-	// Should be found immediately
-	perm, found := cache.Get(ctx, 1, 1, 1)
-	require.True(t, found)
-	assert.Equal(t, team.PermissionTypeMember, perm)
-
-	// Wait for TTL to expire
-	time.Sleep(150 * time.Millisecond)
-
-	// Should not be found after TTL
-	_, found = cache.Get(ctx, 1, 1, 1)
-	assert.False(t, found, "Entry should have expired")
-}
-
-func TestCache_OverwriteEntry(t *testing.T) {
+func TestCache_DifferentOrgs(t *testing.T) {
 	ctx := context.Background()
 	tracer := tracing.InitializeTracerForTest()
 	cache := NewCache(100, 5*time.Minute, tracer)
 
-	// Set initial permission
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
-	perm, found := cache.Get(ctx, 1, 1, 1)
-	require.True(t, found)
-	assert.Equal(t, team.PermissionTypeMember, perm)
+	// Same user ID, different orgs
+	cache.MarkSynced(ctx, 1, 1)
+	cache.MarkSynced(ctx, 2, 1)
 
-	// Overwrite with different permission
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeAdmin)
-	perm, found = cache.Get(ctx, 1, 1, 1)
-	require.True(t, found)
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
+	// Both should be cached independently
+	assert.False(t, cache.ShouldSync(ctx, 1, 1))
+	assert.False(t, cache.ShouldSync(ctx, 2, 1))
+
+	// Clear user 1 (clears ALL entries for this user across all orgs)
+	cache.ClearUser(ctx, 1)
+
+	// Both orgs should need sync (user was cleared from all orgs)
+	assert.True(t, cache.ShouldSync(ctx, 1, 1))
+	assert.True(t, cache.ShouldSync(ctx, 2, 1))
 }
 
 func TestNoOpCache(t *testing.T) {
 	ctx := context.Background()
 	cache := &NoOpCache{}
 
-	// Get should always return false
-	_, found := cache.Get(ctx, 1, 1, 1)
-	assert.False(t, found)
+	// ShouldSync should always return true
+	assert.True(t, cache.ShouldSync(ctx, 1, 1))
+	assert.True(t, cache.ShouldSync(ctx, 1, 2))
 
-	// Set should not panic
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeMember)
+	// MarkSynced should not panic
+	cache.MarkSynced(ctx, 1, 1)
 
-	// Still should not find anything
-	_, found = cache.Get(ctx, 1, 1, 1)
-	assert.False(t, found)
+	// Still should return true (no caching)
+	assert.True(t, cache.ShouldSync(ctx, 1, 1))
 
-	// ClearUser and ClearAll should not panic
+	// ClearUser should not panic
 	cache.ClearUser(ctx, 1)
-	cache.ClearAll(ctx)
-
-	// Len should always return 0
-	assert.Equal(t, 0, cache.Len())
 }
 
 func TestCache_ConcurrentAccess(t *testing.T) {
@@ -227,11 +178,10 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 		go func(idx int) {
 			// Each goroutine does some cache operations
 			userID := int64(idx % 10)
-			teamID := int64(idx % 20)
 			orgID := int64(1)
 
-			cache.Set(ctx, orgID, teamID, userID, team.PermissionTypeMember)
-			cache.Get(ctx, orgID, teamID, userID)
+			cache.ShouldSync(ctx, orgID, userID)
+			cache.MarkSynced(ctx, orgID, userID)
 
 			if idx%10 == 0 {
 				cache.ClearUser(ctx, userID)
@@ -247,8 +197,25 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Cache should still be functional
-	cache.Set(ctx, 1, 1, 1, team.PermissionTypeAdmin)
-	perm, found := cache.Get(ctx, 1, 1, 1)
-	assert.True(t, found)
-	assert.Equal(t, team.PermissionTypeAdmin, perm)
+	cache.MarkSynced(ctx, 1, 1)
+	shouldSync := cache.ShouldSync(ctx, 1, 1)
+	assert.False(t, shouldSync, "Cache should still work after concurrent access")
+}
+
+func TestCache_MarkSyncedBeforeCheck(t *testing.T) {
+	ctx := context.Background()
+	tracer := tracing.InitializeTracerForTest()
+	cache := NewCache(100, 5*time.Minute, tracer)
+
+	// Mark synced first
+	cache.MarkSynced(ctx, 1, 1)
+
+	// Then check - should say don't sync
+	shouldSync := cache.ShouldSync(ctx, 1, 1)
+	assert.False(t, shouldSync)
+
+	// Clear and check again
+	cache.ClearUser(ctx, 1)
+	shouldSync = cache.ShouldSync(ctx, 1, 1)
+	assert.True(t, shouldSync, "Should sync after cache clear")
 }

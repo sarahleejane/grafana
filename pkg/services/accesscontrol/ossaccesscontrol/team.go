@@ -40,17 +40,6 @@ func ProvideTeamPermissions(
 	ac accesscontrol.AccessControl, license licensing.Licensing, service accesscontrol.Service,
 	teamService team.Service, userService user.Service, actionSetService resourcepermissions.ActionSetService,
 ) (*TeamPermissionsService, error) {
-	// Get member cache and tracer from team service if it's the concrete implementation
-	var memberCache teamimpl.MemberCache
-	var teamTracer teamimpl.Tracer
-	if teamSvc, ok := teamService.(interface {
-		GetMemberCache() teamimpl.MemberCache
-		GetTracer() teamimpl.Tracer
-	}); ok {
-		memberCache = teamSvc.GetMemberCache()
-		teamTracer = teamSvc.GetTracer()
-	}
-
 	options := resourcepermissions.Options{
 		Resource:           "teams",
 		ResourceAttribute:  "id",
@@ -92,11 +81,12 @@ func ProvideTeamPermissions(
 			if err != nil {
 				return err
 			}
+
 			switch permission {
 			case "Member":
-				return teamimpl.AddOrUpdateTeamMemberHookWithCache(context.Background(), session, memberCache, teamTracer, cfg, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeMember)
+				return teamimpl.AddOrUpdateTeamMemberHook(session, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeMember)
 			case "Admin":
-				return teamimpl.AddOrUpdateTeamMemberHookWithCache(context.Background(), session, memberCache, teamTracer, cfg, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeAdmin)
+				return teamimpl.AddOrUpdateTeamMemberHook(session, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeAdmin)
 			case "":
 				return teamimpl.RemoveTeamMemberHook(session, &team.RemoveTeamMemberCommand{
 					OrgID:  orgID,
