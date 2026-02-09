@@ -2172,7 +2172,7 @@ func transformSingleQuery(ctx context.Context, targetMap map[string]interface{},
 			queryDatasourceType = *panelDatasource.Type
 		}
 		queryDatasourceUID = *panelDatasource.Uid
-	} else if panelDatasource.Type != nil && *panelDatasource.Type == "datasource" {
+	} else if panelDatasource != nil && panelDatasource.Type != nil && *panelDatasource.Type == "datasource" {
 		// Handle case where panel datasource has type "datasource" but no UID
 		queryDatasourceType = *panelDatasource.Type
 		queryDatasourceUID = resolveGrafanaDatasourceUID(*panelDatasource.Type, "")
