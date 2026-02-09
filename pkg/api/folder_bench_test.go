@@ -167,7 +167,7 @@ func setupDB(b testing.TB) benchScenario {
 
 	quotaService := quotatest.New(false, nil)
 
-	teamSvc, err := teamimpl.ProvideService(db, cfg, tracing.InitializeTracerForTest(), featuremgmt.WithFeatures())
+	teamSvc, err := teamimpl.ProvideService(db, cfg, tracing.InitializeTracerForTest())
 	require.NoError(b, err)
 	orgService, err := orgimpl.ProvideService(db, cfg, quotaService)
 	require.NoError(b, err)
