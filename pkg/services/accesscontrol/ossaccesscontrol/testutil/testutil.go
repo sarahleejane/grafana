@@ -61,7 +61,7 @@ func ProvideFolderPermissions(
 	if err != nil {
 		return nil, err
 	}
-	teamSvc, err := teamimpl.ProvideService(sqlStore, cfg, tracing.InitializeTracerForTest(), features)
+	teamSvc, err := teamimpl.ProvideService(sqlStore, cfg, tracing.InitializeTracerForTest())
 	if err != nil {
 		return nil, err
 	}

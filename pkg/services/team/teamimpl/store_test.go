@@ -14,7 +14,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/tracing"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
-	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/org/orgimpl"
 	"github.com/grafana/grafana/pkg/services/quota/quotaimpl"
 	"github.com/grafana/grafana/pkg/services/serviceaccounts"
@@ -37,7 +36,7 @@ func TestIntegrationTeamCommandsAndQueries(t *testing.T) {
 
 	t.Run("Testing Team commands and queries", func(t *testing.T) {
 		sqlStore, cfg := db.InitTestDBWithCfg(t)
-		teamSvc, err := ProvideService(sqlStore, cfg, tracing.InitializeTracerForTest(), featuremgmt.WithFeatures())
+		teamSvc, err := ProvideService(sqlStore, cfg, tracing.InitializeTracerForTest())
 		require.NoError(t, err)
 		testUser := &user.SignedInUser{
 			OrgID: 1,
@@ -553,7 +552,7 @@ func TestIntegrationSQLStore_SearchTeams(t *testing.T) {
 	}
 
 	store, cfg := db.InitTestDBWithCfg(t, db.InitTestDBOpt{})
-	teamSvc, err := ProvideService(store, cfg, tracing.InitializeTracerForTest(), featuremgmt.WithFeatures())
+	teamSvc, err := ProvideService(store, cfg, tracing.InitializeTracerForTest())
 	require.NoError(t, err)
 
 	// Seed 10 teams
@@ -594,7 +593,7 @@ func TestIntegrationSQLStore_GetTeamMembers_ACFilter(t *testing.T) {
 
 	// Seed 2 teams with 2 members
 	setup := func(store db.DB, cfg *setting.Cfg) {
-		teamSvc, err := ProvideService(store, cfg, tracing.InitializeTracerForTest(), featuremgmt.WithFeatures())
+		teamSvc, err := ProvideService(store, cfg, tracing.InitializeTracerForTest())
 		require.NoError(t, err)
 
 		team1Cmd := team.CreateTeamCommand{
@@ -655,7 +654,7 @@ func TestIntegrationSQLStore_GetTeamMembers_ACFilter(t *testing.T) {
 
 	store, cfg := db.InitTestDBWithCfg(t, db.InitTestDBOpt{})
 	setup(store, cfg)
-	teamSvc, err := ProvideService(store, cfg, tracing.InitializeTracerForTest(), featuremgmt.WithFeatures())
+	teamSvc, err := ProvideService(store, cfg, tracing.InitializeTracerForTest())
 	require.NoError(t, err)
 
 	type getTeamMembersTestCase struct {
