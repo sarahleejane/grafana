@@ -2167,7 +2167,7 @@ func transformSingleQuery(ctx context.Context, targetMap map[string]interface{},
 	// Extract datasource from query or use panel datasource
 	var queryDatasourceType string
 	var queryDatasourceUID string
-	if panelDatasource != nil && panelDatasource.Uid != nil && *panelDatasource.Uid != "-- Mixed --" {
+	if panelDatasource != nil && panelDatasource.Uid != nil && *panelDatasource.Uid != "" && *panelDatasource.Uid != "-- Mixed --" {
 		if panelDatasource.Type != nil {
 			queryDatasourceType = *panelDatasource.Type
 		}
