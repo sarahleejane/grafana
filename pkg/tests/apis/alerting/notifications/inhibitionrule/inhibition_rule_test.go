@@ -2,7 +2,6 @@ package inhibitionrule
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"testing"
 
@@ -20,9 +19,6 @@ import (
 	"github.com/grafana/grafana/pkg/tests/testsuite"
 	"github.com/grafana/grafana/pkg/util/testutil"
 )
-
-//go:embed test-data/*.*
-var testData embed.FS
 
 func TestMain(m *testing.M) {
 	testsuite.Run(m)
