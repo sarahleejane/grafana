@@ -2167,43 +2167,40 @@ func transformSingleQuery(ctx context.Context, targetMap map[string]interface{},
 	// Extract datasource from query or use panel datasource
 	var queryDatasourceType string
 	var queryDatasourceUID string
-	if ds, ok := targetMap["datasource"].(map[string]interface{}); ok {
-		queryDatasourceUID = schemaversion.GetStringValue(ds, "uid")
-		queryDatasourceType = schemaversion.GetStringValue(ds, "type")
-
-		// If target datasource is empty object {} (no uid and no type), treat it as missing
-		// and fall through to use panel datasource (matches frontend behavior in v36 migration)
-		if queryDatasourceUID == "" && queryDatasourceType == "" {
-			// Empty datasource object - will use panel datasource below
-		} else {
-			// If we have a UID, use it to get the correct type from the datasource service
-			// BUT: Don't try to resolve types for template variables
-			if queryDatasourceUID != "" && queryDatasourceType == "" && !isTemplateVariable(queryDatasourceUID) {
-				queryDatasourceType = getDatasourceTypeByUID(ctx, queryDatasourceUID, dsIndexProvider)
-			}
-
-			// Resolve Grafana datasource UID when type is "datasource" and UID is empty
-			queryDatasourceUID = resolveGrafanaDatasourceUID(queryDatasourceType, queryDatasourceUID)
+	if panelDatasource != nil && panelDatasource.Uid != nil && *panelDatasource.Uid != "-- Mixed --" {
+		if panelDatasource.Type != nil {
+			queryDatasourceType = *panelDatasource.Type
 		}
-	} else if dsStr, ok := targetMap["datasource"].(string); ok && isTemplateVariable(dsStr) {
-		// Handle legacy target datasource as string (template variable reference e.g., "$datasource")
-		// Only process template variables - other string values are not supported in V2 format
-		queryDatasourceUID = dsStr
+		queryDatasourceUID = *panelDatasource.Uid
+	} else if panelDatasource.Type != nil && *panelDatasource.Type == "datasource" {
+		// Handle case where panel datasource has type "datasource" but no UID
+		queryDatasourceType = *panelDatasource.Type
+		queryDatasourceUID = resolveGrafanaDatasourceUID(*panelDatasource.Type, "")
 	}
 
-	// Use panel datasource if target datasource is missing or empty
-	if queryDatasourceUID == "" && queryDatasourceType == "" && panelDatasource != nil {
-		// Only use panel datasource if it's not a mixed datasource
-		// Mixed datasources should not be propagated to individual queries
-		if panelDatasource.Uid != nil && *panelDatasource.Uid != "-- Mixed --" {
-			if panelDatasource.Type != nil {
-				queryDatasourceType = *panelDatasource.Type
+	if queryDatasourceUID == "" && queryDatasourceType == "" {
+		if ds, ok := targetMap["datasource"].(map[string]interface{}); ok {
+			queryDatasourceUID = schemaversion.GetStringValue(ds, "uid")
+			queryDatasourceType = schemaversion.GetStringValue(ds, "type")
+
+			// If target datasource is empty object {} (no uid and no type), treat it as missing
+			// and fall through to use panel datasource (matches frontend behavior in v36 migration)
+			if queryDatasourceUID == "" && queryDatasourceType == "" {
+				// Empty datasource object - will use panel datasource below
+			} else {
+				// If we have a UID, use it to get the correct type from the datasource service
+				// BUT: Don't try to resolve types for template variables
+				if queryDatasourceUID != "" && queryDatasourceType == "" && !isTemplateVariable(queryDatasourceUID) {
+					queryDatasourceType = getDatasourceTypeByUID(ctx, queryDatasourceUID, dsIndexProvider)
+				}
+
+				// Resolve Grafana datasource UID when type is "datasource" and UID is empty
+				queryDatasourceUID = resolveGrafanaDatasourceUID(queryDatasourceType, queryDatasourceUID)
 			}
-			queryDatasourceUID = *panelDatasource.Uid
-		} else if panelDatasource.Type != nil && *panelDatasource.Type == "datasource" {
-			// Handle case where panel datasource has type "datasource" but no UID
-			queryDatasourceType = *panelDatasource.Type
-			queryDatasourceUID = resolveGrafanaDatasourceUID(*panelDatasource.Type, "")
+		} else if dsStr, ok := targetMap["datasource"].(string); ok && isTemplateVariable(dsStr) {
+			// Handle legacy target datasource as string (template variable reference e.g., "$datasource")
+			// Only process template variables - other string values are not supported in V2 format
+			queryDatasourceUID = dsStr
 		}
 	}
 
