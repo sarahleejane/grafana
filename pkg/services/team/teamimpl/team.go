@@ -16,9 +16,8 @@ import (
 	"github.com/grafana/grafana/pkg/setting"
 )
 
-// Type aliases for external packages to access
+// Type alias for external packages to access
 type MemberCache = membercache.Cache
-type Tracer = tracing.Tracer
 
 // At package level
 const defaultCacheDuration = 5 * time.Minute
@@ -193,9 +192,4 @@ func (s *Service) RegisterDelete(query string) {
 // GetMemberCache returns the team member cache for clearing on login
 func (s *Service) GetMemberCache() MemberCache {
 	return s.memberCache
-}
-
-// GetTracer returns the tracer for adding spans to operations
-func (s *Service) GetTracer() Tracer {
-	return s.tracer
 }

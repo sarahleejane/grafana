@@ -43,12 +43,9 @@ type cacheImpl struct {
 func NewCache(maxSize int, ttl time.Duration, tracer tracing.Tracer) Cache {
 	logger.Info("Initializing user sync tracking cache", "maxSize", maxSize, "ttl", ttl)
 
-	cache := expirable.NewLRU(
+	cache := expirable.NewLRU[string, time.Time](
 		maxSize,
-		func(key string, value time.Time) {
-			// Eviction callback - log when entries are evicted
-			logger.Debug("Cache entry evicted", "key", key)
-		},
+		nil, // No eviction callback needed
 		ttl,
 	)
 
@@ -71,26 +68,17 @@ func (c *cacheImpl) ShouldSync(ctx context.Context, orgID, userID int64) bool {
 	lastSync, found := c.cache.Get(key)
 
 	if found {
+		// Cache hit means user was recently synced (within TTL)
 		timeSinceSync := time.Since(lastSync)
-		shouldSync := timeSinceSync >= c.ttl
-
 		span.SetAttributes(
 			attribute.Bool("cache.hit", true),
 			attribute.Int64("time_since_sync_ms", timeSinceSync.Milliseconds()),
-			attribute.Bool("should_sync", shouldSync),
 		)
-
-		if !shouldSync {
-			logger.Debug("User recently synced, skipping",
-				"key", key,
-				"lastSync", lastSync,
-				"timeSince", timeSinceSync)
-			return false
-		}
+		return false
 	}
 
+	// Cache miss means user needs sync (either never synced or TTL expired)
 	span.SetAttributes(attribute.Bool("cache.hit", false))
-	logger.Debug("User should be synced", "key", key, "found", found)
 	return true
 }
 

@@ -81,7 +81,6 @@ func ProvideTeamPermissions(
 			if err != nil {
 				return err
 			}
-
 			switch permission {
 			case "Member":
 				return teamimpl.AddOrUpdateTeamMemberHook(session, user.ID, orgID, teamId, user.IsExternal, team.PermissionTypeMember)
