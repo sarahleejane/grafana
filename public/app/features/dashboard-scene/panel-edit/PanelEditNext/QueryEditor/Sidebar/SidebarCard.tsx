@@ -47,7 +47,6 @@ export const SidebarCard = ({ config, isSelected, id, children, onClick }: Sideb
   const { openDrawer, queryLibraryEnabled } = useQueryLibraryContext();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<MenuView>('main');
-  const addButtonRef = useRef<HTMLButtonElement>(null);
 
   // Callback ref: focuses the submenu as soon as it mounts so keyboard
   // navigation (arrow keys) works immediately. FloatingFocusManager only
@@ -171,7 +170,6 @@ export const SidebarCard = ({ config, isSelected, id, children, onClick }: Sideb
         onVisibleChange={handleMenuVisibleChange}
       >
         <button
-          ref={addButtonRef}
           className={styles.addButton}
           data-add-button
           data-menu-open={menuOpen || undefined}
