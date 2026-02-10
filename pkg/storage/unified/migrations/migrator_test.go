@@ -11,10 +11,10 @@ import (
 	grafanarest "github.com/grafana/grafana/pkg/apiserver/rest"
 	"github.com/grafana/grafana/pkg/infra/db"
 	dashboardpkg "github.com/grafana/grafana/pkg/registry/apis/dashboard"
-	"github.com/grafana/grafana/pkg/registry/apis/dashboard/legacy"
 	playlistpkg "github.com/grafana/grafana/pkg/registry/apps/playlist"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/storage/unified/migrations"
+	"github.com/grafana/grafana/pkg/storage/unified/migrations/resources"
 	"github.com/grafana/grafana/pkg/storage/unified/migrations/testcases"
 	"github.com/grafana/grafana/pkg/storage/unified/resource"
 	"github.com/grafana/grafana/pkg/storage/unified/resourcepb"
@@ -400,13 +400,12 @@ func TestUnifiedMigration_RebuildIndexes(t *testing.T) {
 				Times(tt.numRetries)
 
 			// Create migrator with mock client
-			mockAccessor := &legacy.MockMigrationDashboardAccessor{}
-			mockPlaylist := &legacy.MockPlaylistMigrator{}
+			mockSvc := &resources.MockResourceMigrationService{}
 			registry := migrations.NewMigrationRegistry()
-			registry.Register(dashboardpkg.FoldersDashboardsMigration(mockAccessor))
-			registry.Register(playlistpkg.PlaylistMigration(mockPlaylist))
+			registry.Register(dashboardpkg.FoldersDashboardsMigration(mockSvc))
+			registry.Register(playlistpkg.PlaylistMigration(mockSvc))
 			migrator := migrations.ProvideUnifiedMigrator(
-				mockAccessor,
+				mockSvc,
 				mockClient,
 				registry,
 			)
@@ -458,13 +457,12 @@ func TestUnifiedMigration_RebuildIndexes_RetrySuccess(t *testing.T) {
 		Once()
 
 	// Create migrator with mock client
-	mockAccessor := &legacy.MockMigrationDashboardAccessor{}
-	mockPlaylist := &legacy.MockPlaylistMigrator{}
+	mockSvc := &resources.MockResourceMigrationService{}
 	registry := migrations.NewMigrationRegistry()
-	registry.Register(dashboardpkg.FoldersDashboardsMigration(mockAccessor))
-	registry.Register(playlistpkg.PlaylistMigration(mockPlaylist))
+	registry.Register(dashboardpkg.FoldersDashboardsMigration(mockSvc))
+	registry.Register(playlistpkg.PlaylistMigration(mockSvc))
 	migrator := migrations.ProvideUnifiedMigrator(
-		mockAccessor,
+		mockSvc,
 		mockClient,
 		registry,
 	)
@@ -648,13 +646,12 @@ func TestUnifiedMigration_RebuildIndexes_UsingDistributor(t *testing.T) {
 				Times(tt.numRetries)
 
 			// Create migrator with mock client
-			mockAccessor := &legacy.MockMigrationDashboardAccessor{}
-			mockPlaylist := &legacy.MockPlaylistMigrator{}
+			mockSvc := &resources.MockResourceMigrationService{}
 			registry := migrations.NewMigrationRegistry()
-			registry.Register(dashboardpkg.FoldersDashboardsMigration(mockAccessor))
-			registry.Register(playlistpkg.PlaylistMigration(mockPlaylist))
+			registry.Register(dashboardpkg.FoldersDashboardsMigration(mockSvc))
+			registry.Register(playlistpkg.PlaylistMigration(mockSvc))
 			migrator := migrations.ProvideUnifiedMigrator(
-				mockAccessor,
+				mockSvc,
 				mockClient,
 				registry,
 			)
@@ -722,13 +719,12 @@ func TestUnifiedMigration_RebuildIndexes_UsingDistributor_RetrySuccess(t *testin
 		Once()
 
 	// Create migrator with mock client
-	mockAccessor := &legacy.MockMigrationDashboardAccessor{}
-	mockPlaylist := &legacy.MockPlaylistMigrator{}
+	mockSvc := &resources.MockResourceMigrationService{}
 	registry := migrations.NewMigrationRegistry()
-	registry.Register(dashboardpkg.FoldersDashboardsMigration(mockAccessor))
-	registry.Register(playlistpkg.PlaylistMigration(mockPlaylist))
+	registry.Register(dashboardpkg.FoldersDashboardsMigration(mockSvc))
+	registry.Register(playlistpkg.PlaylistMigration(mockSvc))
 	migrator := migrations.ProvideUnifiedMigrator(
-		mockAccessor,
+		mockSvc,
 		mockClient,
 		registry,
 	)
